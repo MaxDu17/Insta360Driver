@@ -10,9 +10,13 @@ OBJDIR = obj
 BINDIR = bin
 
 # Files
-SRC = $(wildcard $(SRCDIR)/*.cpp)  # All source files in src/
+SRC = src/main.cpp # All source files in src/
+# SRC = src/simple_cam.cpp # All source files in src/
+
+# SRC = $(wildcard $(SRCDIR)/*.cpp)  # All source files in src/
+
 OBJ = $(SRC:$(SRCDIR)/%.cpp=$(OBJDIR)/%.o)  # Object files in obj/
-EXEC = $(BINDIR)/program  # Output executable
+EXEC = $(BINDIR)/main  # Output executable
 
 # Default target (build the executable)
 all: $(EXEC)
