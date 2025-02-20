@@ -1,8 +1,7 @@
 # Compiler and linker settings
 CXX = g++
 CXXFLAGS = -std=c++17 -Iinclude `pkg-config --cflags opencv4` # Include directory for header files
-LDFLAGS = -Llib/ -lCameraSDK `pkg-config --libs opencv4` # Path to the library
-# LDLIBS =  # Name of the library (without lib prefix and extension)
+LDFLAGS =  -lavcodec -lavutil -lswscale -Llib/ -lCameraSDK  `pkg-config --libs opencv4` # Path to the library
 
 # Directories
 SRCDIR = src

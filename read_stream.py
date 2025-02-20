@@ -14,38 +14,45 @@ def set_up_receiver(server_ip, server_port):
     print(f"Connection from {client_address}")
     return server_socket, client_socket, client_address
 
+
+# def receive_matrix(client_socket):
+#     buffer_size = int.from_bytes(client_socket.recv(4), byteorder='little')
+
+#     # Receive the actual image data
+#     buffer = b""
+#     while len(buffer) < buffer_size:
+#         buffer += client_socket.recv(buffer_size - len(buffer))
+
+#     # Convert the byte buffer to a numpy array and decode it as an image
+#     np_arr = np.frombuffer(buffer, dtype=np.uint8)
+#     img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+#     import ipdb 
+#     ipdb.set_trace()
+
+#     return img
+
+
 def receive_image(client_socket):
-    # Receive the image size (first 8 bytes)
-    image_size = int.from_bytes(client_socket.recv(8), byteorder='little')
+    buffer_size = int.from_bytes(client_socket.recv(4), byteorder='little')
 
-    # Receive the image data in chunks
-    image_data = b''
-    while len(image_data) < image_size:
-        chunk = client_socket.recv(image_size - len(image_data))
-        if not chunk:
-            break
-        image_data += chunk
-    print(image_size)
-    print("Image received")
+    # Receive the actual image data
+    buffer = b""
+    while len(buffer) < buffer_size:
+        buffer += client_socket.recv(buffer_size - len(buffer))
 
-    # Convert the received image data (binary) into a numpy array
-    nparr = np.frombuffer(image_data, np.uint8)
+    # Convert the byte buffer to a numpy array and decode it as an image
+    np_arr = np.frombuffer(buffer, dtype=np.uint8)
+    img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
     import ipdb 
     ipdb.set_trace()
-
-    # Decode the numpy array into an image
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    # TODO: DECODE THIS 
 
     if img is not None:
         # Show the image using OpenCV (you can also save it if needed)
         cv2.imshow("Received Image", img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
-        
+        cv2.waitKey(1)        
         # Optionally save the image
-        cv2.imwrite("received_image.png", img)
-        print("Image saved as 'received_image.png'")
+        # cv2.imwrite("received_image.png", img)
+        # print("Image saved as 'received_image.png'")
     else:
         print("Failed to decode image.")
 

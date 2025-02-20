@@ -18,19 +18,11 @@
 #include <arpa/inet.h>
 #include <unistd.h>
 
-
-#ifdef WIN32
-#include <conio.h>
-#include <windows.h>
-#include <direct.h>
-#endif
-
-// Define constants
-
-
-// int sock; 
- // Create socket
-
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavutil/imgutils.h>
+#include <libswscale/swscale.h>
+}
 
 
 
@@ -49,6 +41,31 @@ public:
             return;
         }
 
+        // Find the decoder for the h264
+        codec = avcodec_find_decoder(AV_CODEC_ID_H264);
+        if (!codec) {
+            std::cerr << "Codec not found\n";
+            exit(1);
+        }
+
+        codecCtx = avcodec_alloc_context3(codec);
+        codecCtx->flags2 |= AV_CODEC_FLAG2_FAST;
+        if (!codecCtx) {
+            std::cerr << "Could not allocate video codec context\n";
+            exit(1);
+        }
+
+        // Open codec
+        if (avcodec_open2(codecCtx, codec, nullptr) < 0) {
+            std::cerr << "Could not open codec\n";
+            exit(1);
+        }
+
+        avFrame = av_frame_alloc();
+        pkt = av_packet_alloc();
+        // av_init_packet(&pkt); 
+        
+        //decoding stuff 
         sockaddr_in serverAddr;
         serverAddr.sin_family = AF_INET;
         serverAddr.sin_port = htons(SERVER_PORT);
@@ -66,46 +83,140 @@ public:
             close(sock);
             return;
         }
+
     }
     ~TestStreamDelegate() {
         fclose(file1_);
         fclose(file2_);
         close(sock); 
+        av_frame_free(&avFrame);
+        av_packet_free(&pkt);
+        avcodec_free_context(&codecCtx);
     }
 
 
-    void sendImage(const uint8_t* imageData, size_t imageSize) {
-        // Send the size of the image first
-        ssize_t sent = send(sock, &imageSize, sizeof(imageSize), 0);
-        std::cout << imageSize << std::endl; 
-        if (sent < 0) {
-            std::cerr << "Failed to send image size" << std::endl;
-            close(sock);
-            return;
-        }
+    // void sendImage(const uint8_t* imageData, size_t imageSize) {
+    //     // Send the size of the image first
+    //     ssize_t sent = send(sock, &imageSize, sizeof(imageSize), 0);
+    //     std::cout << imageSize << std::endl; 
+    //     if (sent < 0) {
+    //         std::cerr << "Failed to send image size" << std::endl;
+    //         close(sock);
+    //         return;
+    //     }
 
-        // Send the image data
-        sent = send(sock, imageData, imageSize, 0);
-        if (sent < 0) {
-            std::cerr << "Failed to send image data" << std::endl;
-            close(sock);
-            return;
-        }
+    //     // Send the image data
+    //     sent = send(sock, imageData, imageSize, 0);
+    //     if (sent < 0) {
+    //         std::cerr << "Failed to send image data" << std::endl;
+    //         close(sock);
+    //         return;
+    //     }
+    //     std::cout << "Image sent successfully!" << std::endl;
 
-        std::cout << "Image sent successfully!" << std::endl;
+    // }
 
-    // close(sock); 
+    void sendMatrix(const cv::Mat& mat) {
+    // Convert cv::Mat to a byte buffer (serialization)
+        std::vector<uchar> buffer;
+        cv::imencode(".jpg", mat, buffer);  // You can use any encoding like .jpg, .png, etc.
+
+        // Send the size of the buffer first
+        int bufferSize = buffer.size();
+        std::cout << bufferSize << " " << sizeof(bufferSize) << std::endl; 
+        send(sock, &bufferSize, sizeof(bufferSize), 0);
+
+        // Send the actual data (the encoded image)
+        send(sock, buffer.data(), bufferSize, 0);
     }
+
+    // cv::Mat avframeToCvmat(const AVFrame *frame) {
+    //     int width = frame->width;
+    //     int height = frame->height;
+
+    //     // Create an OpenCV Mat with the same dimensions as the AVFrame
+    //     cv::Mat yuv(height + height / 2, width, CV_8UC1, frame->data[0]);
+
+    //     // Convert the YUV420P frame to BGR
+    //     cv::Mat bgr;
+    //     cv::cvtColor(yuv, bgr, cv::COLOR_YUV420p2BGR);
+
+    //     return bgr;
+    // }
 
     void OnAudioData(const uint8_t* data, size_t size, int64_t timestamp) override {
         std::cout << "on audio data:" << std::endl;
     }
     void OnVideoData(const uint8_t* data, size_t size, int64_t timestamp, uint8_t streamType, int stream_index = 0) override {
-        // std::cout << "on video frame:" << size << ";" << timestamp << std::endl;
+        // Feed data into packet
         if (stream_index == 0) {
-            sendImage(data, size); 
-            // fwrite(data, sizeof(uint8_t), size, file1_);
+            pkt->data = const_cast<uint8_t*>(data);
+            pkt->size = size;
+
+            // // Send the packet to the decoder
+            if (avcodec_send_packet(codecCtx, pkt) == 0) {
+                // Receive frame from decoder
+                while (avcodec_receive_frame(codecCtx, avFrame) == 0) {
+                    // if (avFrame->format != AV_PIX_FMT_YUV420P) {
+                    //     std::cout << "Unexpected pixel format: " << avFrame->format << std::endl;
+                    //     exit(0); 
+                    // }
+
+                    int width = avFrame->width;
+                    int height = avFrame->height;
+                    int chromaHeight = height / 2;
+                    int chromaWidth = width / 2;
+
+                    int y_stride = avFrame->linesize[0];
+                    int u_stride = avFrame->linesize[1];
+                    int v_stride = avFrame->linesize[2];
+
+                    cv::Mat yuv(height * 3 / 2, width, CV_8UC1, cv::Scalar(0));
+
+                    // Copy Y plane
+                    for (int i = 0; i < height; i++) {
+                        memcpy(yuv.data + i * width, avFrame->data[0] + i * y_stride, width);
+                    }
+
+                    // Copy U plane
+                    for (int i = 0; i < chromaHeight; i++) {
+                        memcpy(yuv.data + width * height + i * chromaWidth, avFrame->data[1] + i * u_stride, chromaWidth);
+                    }
+
+                    // Copy V plane
+                    for (int i = 0; i < chromaHeight; i++) {
+                        memcpy(yuv.data + width * height + chromaWidth * chromaHeight + i * chromaWidth, avFrame->data[2] + i * v_stride, chromaWidth);
+                    }
+
+                    // // Create a single Mat to hold all three planes
+                    // cv::Mat yuv(height + chromaHeight, width, CV_8UC1);
+
+                    // // Copy the Y plane
+                    // memcpy(yuv.data, avFrame->data[0], width * height);
+
+                    // // Copy the U plane
+                    // memcpy(yuv.data + width * height, avFrame->data[1], chromaWidth * chromaHeight);
+
+                    // // Copy the V plane
+                    // memcpy(yuv.data + width * height + chromaWidth * chromaHeight, avFrame->data[2], chromaWidth * chromaHeight);
+
+                    // std::cout << yuv.rows << " " << yuv.cols << std::endl; 
+                         // Convert the YUV420P frame to BGR
+                    // cv::Mat bgr;
+                    // cv::cvtColor(yuv, bgr, cv::COLOR_YUV420p2BGR);
+                    cv::imwrite("test.png", yuv); 
+                    
+                    // cv::imshow("testing", yuv); 
+                    sendMatrix(yuv); 
+                    exit(0); //only send one frame 
+                }
+            }
         }
+        // std::cout << "on video frame:" << size << ";" << timestamp << std::endl;
+        // if (stream_index == 0) {
+        //     sendImage(data, size); 
+        //     // fwrite(data, sizeof(uint8_t), size, file1_);
+        // }
         // if (stream_index == 1) {
         //     fwrite(data, sizeof(uint8_t), size, file2_);
         // }
@@ -127,6 +238,12 @@ private:
     FILE* file2_;
     int64_t last_timestamp = 0;
     int sock; 
+
+    AVCodec* codec;
+    AVCodecContext* codecCtx;
+    AVFrame* avFrame;
+    AVPacket* pkt;
+    struct SwsContext* img_convert_ctx;
 };
 
 std::shared_ptr<ins_camera::Camera> cam; 
