@@ -1,43 +1,60 @@
-import cv2
+import socket
 import numpy as np
+import cv2
 
-def h264_stream_to_numpy_array(stream_path):
-    # Open the video stream (could be a file or RTSP URL)
-    cap = cv2.VideoCapture(stream_path)
+def set_up_receiver(server_ip, server_port):
+    # Set up the socket
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((server_ip, server_port))
+    print(f"Listening for connections on {server_ip}:{server_port}...")
+    server_socket.listen(1)
 
-    if not cap.isOpened():
-        print("Error: Could not open the video stream.")
-        return None
+    # Accept a connection from the C++ client
+    client_socket, client_address = server_socket.accept()
+    print(f"Connection from {client_address}")
+    return server_socket, client_socket, client_address
 
-    frames = []
+def receive_image(client_socket):
+    # Receive the image size (first 8 bytes)
+    image_size = int.from_bytes(client_socket.recv(8), byteorder='little')
 
+    # Receive the image data in chunks
+    image_data = b''
+    while len(image_data) < image_size:
+        chunk = client_socket.recv(image_size - len(image_data))
+        if not chunk:
+            break
+        image_data += chunk
+    print(image_size)
+    print("Image received")
+
+    # Convert the received image data (binary) into a numpy array
+    nparr = np.frombuffer(image_data, np.uint8)
+    import ipdb 
+    ipdb.set_trace()
+
+    # Decode the numpy array into an image
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    # TODO: DECODE THIS 
+
+    if img is not None:
+        # Show the image using OpenCV (you can also save it if needed)
+        cv2.imshow("Received Image", img)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        
+        # Optionally save the image
+        cv2.imwrite("received_image.png", img)
+        print("Image saved as 'received_image.png'")
+    else:
+        print("Failed to decode image.")
+
+
+
+if __name__ == "__main__":
+    server_socket, client_socket, client_address =  set_up_receiver('127.0.0.1', 8080)
     while True:
-        # Read a frame from the stream
-        ret, frame = cap.read()
-        
-        if ret:
-            cv2.imshow("test", frame)
-            cv2.waitKey(1)
-                
-        # # If we couldn't read a frame, end of stream
-        # if not ret:
-        #     break
-        
-        # # Convert the frame to a NumPy array (it is already a NumPy array in OpenCV)
-        # frames.append(frame)
-    
-    # Release the video stream
-    cap.release()
+        receive_image(client_socket)  # Listen on localhost and port 8080
 
-    # # Convert list of frames to a single NumPy array (if desired)
-    # frames_array = np.array(frames)
-
-    # return frames_array
-
-# Example usage
-stream_path = '01.h264'  # Path to the H.264 video stream or file
-frames_array = h264_stream_to_numpy_array(stream_path)
-
-# Optional: Print the shape of the resulting NumPy array (frames, height, width, channels)
-if frames_array is not None:
-    print(f"Shape of the NumPy array: {frames_array.shape}")
+    client_socket.close()
+    server_socket.close()
