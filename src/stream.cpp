@@ -54,31 +54,8 @@ public:
         avFrame = av_frame_alloc();
         pkt = av_packet_alloc();
 
-
-        // back when this was the client and the python program the server 
-        // sockaddr_in serverAddr;
-        // serverAddr.sin_family = AF_INET;
-        // serverAddr.sin_port = htons(SERVER_PORT);
-
-        // // Convert IP address from string to binary form
-        // if (inet_pton(AF_INET, SERVER_IP.c_str(), &serverAddr.sin_addr) <= 0) {
-        //     std::cerr << "Invalid address or address not supported" << std::endl;
-        //     close(sock);
-        //     return;
-        // }
-
-        // // Connect to the Python server
-        // if (connect(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-        //     std::cerr << "Connection failed" << std::endl;
-        //     close(sock);
-        //     return;
-        // }
-
     }
     ~StreamProcessor() {
-        // fclose(file1_);
-        // fclose(file2_);
-        // close(server_fd); 
         av_frame_free(&avFrame);
         av_packet_free(&pkt);
         avcodec_free_context(&codecCtx);
@@ -91,9 +68,8 @@ public:
 
     void sendMatrix(const cv::Mat& mat) {
         if(client_socket == -1){ //if there isn't a connection, then don't send anything 
-            return; 
+            return;
         }
-        std::cout <<" sending something!" << std::endl; 
     // Convert cv::Mat to a byte buffer (serialization)
         std::vector<uchar> buffer;
         cv::imencode(".jpg", mat, buffer);  // You can use any encoding like .jpg, .png, etc.
@@ -101,10 +77,17 @@ public:
         // Send the size of the buffer first
         int bufferSize = buffer.size();
         // std::cout << bufferSize << " " << sizeof(bufferSize) << std::endl; 
-        send(client_socket, &bufferSize, sizeof(bufferSize), 0);
-
+        ssize_t result = send(client_socket, &bufferSize, sizeof(bufferSize), MSG_NOSIGNAL); 
+        if(result < 0){
+            client_socket = -1; 
+            return;
+        }
         // Send the actual data (the encoded image)
-        send(client_socket, buffer.data(), bufferSize, 0);
+        result = send(client_socket, buffer.data(), bufferSize, MSG_NOSIGNAL); 
+        if(result < 0){
+            client_socket = -1; 
+            return;
+        }
     }
 
     void OnAudioData(const uint8_t* data, size_t size, int64_t timestamp) override {
@@ -150,21 +133,13 @@ public:
                          // Convert the YUV420P frame to BGR
                     cv::Mat bgr;
                     cv::cvtColor(yuv, bgr, cv::COLOR_YUV2BGR_I420);
-
+                    // sendMatrix(bgr); 
                     cv::Mat smaller; 
-                    cv::resize(bgr, smaller, cv::Size(width / 4, height / 4), cv::INTER_LINEAR);
+                    cv::resize(bgr, smaller, cv::Size(width / 2, height / 2), cv::INTER_LINEAR);
                     sendMatrix(smaller); 
                 }
             }
         }
-        // std::cout << "on video frame:" << size << ";" << timestamp << std::endl;
-        // if (stream_index == 0) {
-        //     sendImage(data, size); 
-        //     // fwrite(data, sizeof(uint8_t), size, file1_);
-        // }
-        // if (stream_index == 1) {
-        //     fwrite(data, sizeof(uint8_t), size, file2_);
-        // }
     }
     void OnGyroData(const std::vector<ins_camera::GyroData>& data) override {
     }
@@ -188,7 +163,9 @@ private:
     struct SwsContext* img_convert_ctx;
 };
 
-std::shared_ptr<ins_camera::Camera> cam; 
+
+
+std::shared_ptr<ins_camera::Camera> cam; //global variable! 
 
 void onExit(){
    if (cam->StopLiveStreaming()) {
@@ -200,8 +177,31 @@ void onExit(){
     cam->Close();
 }
 
+#include <iostream>
+#include <csignal>
+#include <cstdlib>
+
+// Function to handle SIGINT (Ctrl+C)
+void signalHandler(int signum) {
+    std::cout << "\nInterrupt signal (" << signum << ") received.\n";
+    std::cout << "Cleaning up before exit...\n";
+    if(cam == nullptr){
+        std::exit(signum); // Calls `atexit` functions before exiting
+    }
+    if (cam->StopLiveStreaming()) {
+        std::cout << "Successfully closed stream!" << std::endl;
+    }
+    else {
+        std::cerr << "failed to stop live." << std::endl;
+    }
+    cam->Close();
+
+    std::exit(signum); // Calls `atexit` functions before exiting
+}
+
 
 int main(int argc, char* argv[]) {
+    std::signal(SIGINT, signalHandler); 
     // std::atexit(onExit); 
     std::cout << "begin open camera" << std::endl;
     ins_camera::DeviceDiscovery discovery;
@@ -215,7 +215,7 @@ int main(int argc, char* argv[]) {
 
     if (list.size() <= 0) {
         std::cerr << "no device found." << std::endl;
-        return -1;
+        exit(EXIT_FAILURE); 
     }
 
     cam = std::make_shared<ins_camera::Camera>(list[0].info);
@@ -224,7 +224,7 @@ int main(int argc, char* argv[]) {
     //ins_camera::Camera cam(list[0].info);
     if (!cam->Open()) {
         std::cerr << "failed to open camera" << std::endl;
-        return -1;
+        exit(EXIT_FAILURE); 
     }
 
     auto exposure = std::make_shared<ins_camera::ExposureSettings>();
@@ -236,12 +236,8 @@ int main(int argc, char* argv[]) {
 
     auto success = cam->SetExposureSettings(ins_camera::CameraFunctionMode::FUNCTION_MODE_LIVE_STREAM, exposure);
 
-
-
     std::shared_ptr<ins_camera::StreamDelegate> delegate = std::make_shared<StreamProcessor>();
     cam->SetStreamDelegate(delegate);
-
-
     discovery.FreeDeviceDescriptors(list);
 
     std::cout << "Succeed to open camera..." << std::endl;
@@ -257,6 +253,7 @@ int main(int argc, char* argv[]) {
     param.video_bitrate = 1024 * 1024 / 2;
     param.enable_audio = false;
     param.using_lrv = false;
+    std::cout << "trying to start stream" << std::endl; 
     if (cam->StartLiveStreaming(param)) {
         std::cout << "successfully started live stream" << std::endl;
     }
@@ -303,6 +300,5 @@ int main(int argc, char* argv[]) {
         StreamProcessor* processPtr = dynamic_cast<StreamProcessor*>(delegate.get()); //allows us to access the original function 
         processPtr->setClient(new_socket); 
     }
-
     return 0;
 }
