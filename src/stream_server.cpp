@@ -1,4 +1,4 @@
-﻿#include <iostream>
+#include <iostream>
 #include <thread>
 #include "camera/camera.h"
 #include "camera/photography_settings.h"
@@ -40,6 +40,7 @@ public:
             std::cerr << "Socket creation failed" << std::endl;
             return;
         }
+
 
 
         // Find the decoder for the h264
@@ -103,7 +104,7 @@ public:
 
         // Send the size of the buffer first
         int bufferSize = buffer.size();
-        // std::cout << bufferSize << " " << sizeof(bufferSize) << std::endl; 
+        std::cout << bufferSize << " " << sizeof(bufferSize) << std::endl; 
         send(sock, &bufferSize, sizeof(bufferSize), 0);
 
         // Send the actual data (the encoded image)
@@ -231,35 +232,13 @@ int main(int argc, char* argv[]) {
     }
 
     cam = std::make_shared<ins_camera::Camera>(list[0].info);
-
-    // for(int i = 0; i < 23; i++){
-    //     // auto success = cam->SetExposureSettings(i, exposure);
-    //             auto success = cam->SetExposureSettings(ins_camera::CameraFunctionMode::FUNCTION_MODE_NORMAL_VIDEO, exposure);
-
-    //         if (success) {
-    //         std::cout << "Success!" << std::endl;
-    //         } else {
-    //         std::cout << "Failed to set exposure settings" << std::endl;
-    //     }
-    // }
-    
-
     //ins_camera::Camera cam(list[0].info);
     if (!cam->Open()) {
         std::cerr << "failed to open camera" << std::endl;
         return -1;
     }
 
-    auto exposure = std::make_shared<ins_camera::ExposureSettings>();
-    exposure->SetExposureMode(ins_camera::PhotographyOptions_ExposureMode::PhotographyOptions_ExposureOptions_Program_MANUAL);//set to manual exposure mode
-    exposure->SetIso(500); // set iso to 400
-    exposure->SetShutterSpeed(1.0/300.0); // set shutter to 1/120 second.
-    // auto success = cam.SetExposureSettings(ins_camera::CameraFunctionMode::FUNCTION_MODE_NORMAL_VIDEO, exposure);
-    // auto ret = cam->SetExposureSettings(ins_camera::CameraFunctionMode::FUNCTION_MODE_NORMAL_IMAGE, exposure);
-
-    auto success = cam->SetExposureSettings(ins_camera::CameraFunctionMode::FUNCTION_MODE_LIVE_STREAM, exposure);
-
-
+    //std::cout << "http base url:" << cam->GetHttpBaseUrl() << std::endl;
 
     std::shared_ptr<ins_camera::StreamDelegate> delegate = std::make_shared<TestStreamDelegate>();
     cam->SetStreamDelegate(delegate);
@@ -270,8 +249,8 @@ int main(int argc, char* argv[]) {
 
     auto camera_type = cam->GetCameraType();
 
-    // auto start = time(NULL);
-    // cam->SyncLocalTimeToCamera(start);
+    auto start = time(NULL);
+    cam->SyncLocalTimeToCamera(start);
 
     ins_camera::LiveStreamParam param;
     param.video_resolution = ins_camera::VideoResolution::RES_720_360P30;
