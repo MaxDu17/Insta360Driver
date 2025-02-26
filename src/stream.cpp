@@ -26,21 +26,10 @@ extern "C" {
 
 
 
-class TestStreamDelegate : public ins_camera::StreamDelegate {
+class StreamProcessor : public ins_camera::StreamDelegate {
 public:
-    TestStreamDelegate() {
-        std::string SERVER_IP = "127.0.0.1";  // Replace with your receiver's IP address
-        int SERVER_PORT = 8080;
-
-        // file1_ = fopen("./01.h264", "wb");
-        // file2_ = fopen("./02.h264", "wb");
-
-        sock = socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) {
-            std::cerr << "Socket creation failed" << std::endl;
-            return;
-        }
-
+    StreamProcessor() {
+        //setting up the processing pipeline for the images 
 
         // Find the decoder for the h264
         codec = avcodec_find_decoder(AV_CODEC_ID_H264);
@@ -64,39 +53,47 @@ public:
 
         avFrame = av_frame_alloc();
         pkt = av_packet_alloc();
-        // av_init_packet(&pkt); 
-        
-        //decoding stuff 
-        sockaddr_in serverAddr;
-        serverAddr.sin_family = AF_INET;
-        serverAddr.sin_port = htons(SERVER_PORT);
 
-        // Convert IP address from string to binary form
-        if (inet_pton(AF_INET, SERVER_IP.c_str(), &serverAddr.sin_addr) <= 0) {
-            std::cerr << "Invalid address or address not supported" << std::endl;
-            close(sock);
-            return;
-        }
 
-        // Connect to the Python server
-        if (connect(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-            std::cerr << "Connection failed" << std::endl;
-            close(sock);
-            return;
-        }
+        // back when this was the client and the python program the server 
+        // sockaddr_in serverAddr;
+        // serverAddr.sin_family = AF_INET;
+        // serverAddr.sin_port = htons(SERVER_PORT);
+
+        // // Convert IP address from string to binary form
+        // if (inet_pton(AF_INET, SERVER_IP.c_str(), &serverAddr.sin_addr) <= 0) {
+        //     std::cerr << "Invalid address or address not supported" << std::endl;
+        //     close(sock);
+        //     return;
+        // }
+
+        // // Connect to the Python server
+        // if (connect(sock, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        //     std::cerr << "Connection failed" << std::endl;
+        //     close(sock);
+        //     return;
+        // }
 
     }
-    ~TestStreamDelegate() {
+    ~StreamProcessor() {
         // fclose(file1_);
         // fclose(file2_);
-        close(sock); 
+        // close(server_fd); 
         av_frame_free(&avFrame);
         av_packet_free(&pkt);
         avcodec_free_context(&codecCtx);
     }
 
+    void setClient(int new_socket){
+        client_socket = new_socket; 
+    }
+
 
     void sendMatrix(const cv::Mat& mat) {
+        if(client_socket == -1){ //if there isn't a connection, then don't send anything 
+            return; 
+        }
+        std::cout <<" sending something!" << std::endl; 
     // Convert cv::Mat to a byte buffer (serialization)
         std::vector<uchar> buffer;
         cv::imencode(".jpg", mat, buffer);  // You can use any encoding like .jpg, .png, etc.
@@ -104,14 +101,14 @@ public:
         // Send the size of the buffer first
         int bufferSize = buffer.size();
         // std::cout << bufferSize << " " << sizeof(bufferSize) << std::endl; 
-        send(sock, &bufferSize, sizeof(bufferSize), 0);
+        send(client_socket, &bufferSize, sizeof(bufferSize), 0);
 
         // Send the actual data (the encoded image)
-        send(sock, buffer.data(), bufferSize, 0);
+        send(client_socket, buffer.data(), bufferSize, 0);
     }
 
     void OnAudioData(const uint8_t* data, size_t size, int64_t timestamp) override {
-        std::cout << "on audio data:" << std::endl;
+        // std::cout << "on audio data:" << std::endl;
     }
     void OnVideoData(const uint8_t* data, size_t size, int64_t timestamp, uint8_t streamType, int stream_index = 0) override {
         // Feed data into packet
@@ -156,12 +153,6 @@ public:
 
                     cv::Mat smaller; 
                     cv::resize(bgr, smaller, cv::Size(width / 4, height / 4), cv::INTER_LINEAR);
-                    // cv::cvtColor(yuv, bgr, cv::COLOR_YUV420p2RGB);
-
-                    
-                    // cv::imwrite("test.png", bgr); 
-                    
-                    // cv::imshow("testing", yuv); 
                     sendMatrix(smaller); 
                 }
             }
@@ -176,22 +167,19 @@ public:
         // }
     }
     void OnGyroData(const std::vector<ins_camera::GyroData>& data) override {
-        //for (auto& gyro : data) {
-        //	if (gyro.timestamp - last_timestamp > 2) {
-        //		fprintf(file1_, "timestamp:%lld package_size = %d  offtimestamp = %lld gyro:[%f %f %f] accel:[%f %f %f]\n", gyro.timestamp, data.size(), gyro.timestamp - last_timestamp, gyro.gx, gyro.gy, gyro.gz, gyro.ax, gyro.ay, gyro.az);
-        //	}
-        //	last_timestamp = gyro.timestamp;
-        //}
     }
     void OnExposureData(const ins_camera::ExposureData& data) override {
         //fprintf(file2_, "timestamp:%lld shutter_speed_s:%f\n", data.timestamp, data.exposure_time);
     }
 
 private:
-    FILE* file1_;
-    FILE* file2_;
+    // FILE* file1_;
+    // FILE* file2_;
     int64_t last_timestamp = 0;
-    int sock; 
+    int client_socket = -1; 
+    // int server_fd; 
+
+    // int client_socket; 
 
     AVCodec* codec;
     AVCodecContext* codecCtx;
@@ -232,17 +220,6 @@ int main(int argc, char* argv[]) {
 
     cam = std::make_shared<ins_camera::Camera>(list[0].info);
 
-    // for(int i = 0; i < 23; i++){
-    //     // auto success = cam->SetExposureSettings(i, exposure);
-    //             auto success = cam->SetExposureSettings(ins_camera::CameraFunctionMode::FUNCTION_MODE_NORMAL_VIDEO, exposure);
-
-    //         if (success) {
-    //         std::cout << "Success!" << std::endl;
-    //         } else {
-    //         std::cout << "Failed to set exposure settings" << std::endl;
-    //     }
-    // }
-    
 
     //ins_camera::Camera cam(list[0].info);
     if (!cam->Open()) {
@@ -261,8 +238,9 @@ int main(int argc, char* argv[]) {
 
 
 
-    std::shared_ptr<ins_camera::StreamDelegate> delegate = std::make_shared<TestStreamDelegate>();
+    std::shared_ptr<ins_camera::StreamDelegate> delegate = std::make_shared<StreamProcessor>();
     cam->SetStreamDelegate(delegate);
+
 
     discovery.FreeDeviceDescriptors(list);
 
@@ -282,7 +260,49 @@ int main(int argc, char* argv[]) {
     if (cam->StartLiveStreaming(param)) {
         std::cout << "successfully started live stream" << std::endl;
     }
-    while(true); //hang until we quit 
+
+    //SET UP THE SERVER!! 
+    int server_fd; 
+    std::string SERVER_IP = "127.0.0.1";  // Replace with your receiver's IP address
+    int SERVER_PORT = 8080; 
+
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd < 0) {
+        std::cerr << "Socket creation failed" << std::endl;
+        exit(EXIT_FAILURE); 
+    }
+    
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(SERVER_PORT);
+
+    // Bind socket to port
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        perror("Bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+      // Listen for incoming connections
+    if (listen(server_fd, 3) < 0) {
+        perror("Listen failed");
+        exit(EXIT_FAILURE);
+    }
+    std::cout << "Listening on port " << SERVER_PORT << "..." << std::endl;
+
+   
+    int new_socket; 
+    while(true){
+        std::cout << "Waiting for another connection" << std::endl; 
+    // Accept a client connection
+        if ((new_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen)) < 0) {
+            perror("Accept failed");
+            exit(EXIT_FAILURE);
+        }
+        StreamProcessor* processPtr = dynamic_cast<StreamProcessor*>(delegate.get()); //allows us to access the original function 
+        processPtr->setClient(new_socket); 
+    }
 
     return 0;
 }
